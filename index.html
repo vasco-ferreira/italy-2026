@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex, nofollow">
+<meta name="theme-color" content="#b4482d">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Italy 2026">
+<title>Italy 2026</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<style>
+body{margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;background:#f7f2ea;color:#23262b;font:16px/1.45 -apple-system,BlinkMacSystemFont,"Helvetica Neue",Arial,sans-serif}
+form{width:min(340px,88vw);text-align:center}
+h1{font:normal 44px Georgia,serif;color:#b4482d;margin:0 0 4px}
+p{color:#6b6b6b;margin:0 0 22px}
+input[type=password]{width:100%;font-size:17px;padding:13px 14px;border:1px solid #d8cdbd;border-radius:12px;background:#fff}
+button{margin-top:12px;width:100%;font:600 17px -apple-system,sans-serif;padding:13px;border:0;border-radius:12px;background:#b4482d;color:#fff}
+.err{color:#b4482d;min-height:22px;margin-top:10px;font-size:14px}
+label{display:flex;gap:8px;justify-content:center;align-items:center;margin-top:14px;font-size:14px;color:#6b6b6b}
+</style>
+</head>
+<body>
+<form id="f" hidden>
+  <h1>Italy</h1>
+  <p>Trip guide · 31 Oct – 8 Nov 2026</p>
+  <input type="password" id="pw" placeholder="Password" autocomplete="current-password" autofocus>
+  <button type="submit" id="go">Open</button>
+  <label><input type="checkbox" id="keep" checked> Remember on this phone</label>
+  <div class="err" id="err"></div>
+</form>
+<script>
+const ITERATIONS = 310000, STORE = "italy-2026-key";
+const b64 = buf => btoa(String.fromCharCode(...new Uint8Array(buf)));
+const unb64 = s => Uint8Array.from(atob(s), c => c.charCodeAt(0));
+async function payload() {
+  const r = await fetch("guide.bin", {cache: "no-cache"});
+  if (!r.ok) throw new Error("download");
+  return new Uint8Array(await r.arrayBuffer());
+}
+async function keyFromPassword(pw, salt) {
+  const base = await crypto.subtle.importKey("raw", new TextEncoder().encode(pw), "PBKDF2", false, ["deriveBits"]);
+  return crypto.subtle.deriveBits({name: "PBKDF2", hash: "SHA-256", salt, iterations: ITERATIONS}, base, 256);
+}
+async function unlockWith(raw, data) {
+  const key = await crypto.subtle.importKey("raw", raw, "AES-GCM", false, ["decrypt"]);
+  const plain = await crypto.subtle.decrypt({name: "AES-GCM", iv: data.slice(16, 28)}, key, data.slice(28));
+  const html = new TextDecoder().decode(plain);
+  document.open(); document.write(html); document.close();
+}
+async function start() {
+  const saved = localStorage.getItem(STORE);
+  if (saved) {
+    try { await unlockWith(unb64(saved), await payload()); return; }
+    catch (e) { localStorage.removeItem(STORE); }
+  }
+  document.getElementById("f").hidden = false;
+}
+document.getElementById("f").addEventListener("submit", async ev => {
+  ev.preventDefault();
+  const err = document.getElementById("err"), go = document.getElementById("go");
+  err.textContent = ""; go.disabled = true; go.textContent = "Opening…";
+  try {
+    const data = await payload();
+    const raw = await keyFromPassword(document.getElementById("pw").value, data.slice(0, 16));
+    const keep = document.getElementById("keep").checked;
+    await crypto.subtle.decrypt({name: "AES-GCM", iv: data.slice(16, 28)}, await crypto.subtle.importKey("raw", raw, "AES-GCM", false, ["decrypt"]), data.slice(28));
+    if (keep) localStorage.setItem(STORE, b64(raw));
+    await unlockWith(raw, data);
+  } catch (e) {
+    err.textContent = e.message === "download" ? "Couldn't load the guide. Check your connection." : "Wrong password.";
+    go.disabled = false; go.textContent = "Open";
+  }
+});
+if ("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js");
+start();
+</script>
+</body>
+</html>
